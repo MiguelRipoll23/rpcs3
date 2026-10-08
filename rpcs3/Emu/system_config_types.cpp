@@ -309,6 +309,23 @@ void fmt_class_string<spu_decoder_type>::format(std::string& out, u64 arg)
 }
 
 template <>
+void fmt_class_string<mgo_task_acceleration>::format(std::string& out, u64 arg)
+{
+	format_enum(out, arg, [](mgo_task_acceleration value)
+	{
+		switch (value)
+		{
+		case mgo_task_acceleration::off: return "Off";
+		case mgo_task_acceleration::basic: return "Basic";
+		case mgo_task_acceleration::standard: return "Standard";
+		case mgo_task_acceleration::maximum: return "Maximum";
+		}
+
+		return unknown;
+	});
+}
+
+template <>
 void fmt_class_string<spu_block_size_type>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](spu_block_size_type type)

@@ -2,6 +2,31 @@
   "version": 3,
   "configurePresets": [
     {
+      "name": "mingw-clang",
+      "displayName": "Windows x64 (clang + libc++ cross-compiled, matches the savemgo reference binary)",
+      "generator": "Ninja",
+      "binaryDir": "build-mingw-clang",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/buildfiles/toolchain-mingw-clang.cmake",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "LLVM_ENABLE_LIBCXX": "ON",
+        "DISABLE_LTO": "TRUE",
+        "USE_NATIVE_INSTRUCTIONS": "OFF",
+        "USE_PRECOMPILED_HEADERS": "ON",
+        "USE_FAUDIO": "OFF",
+        "USE_SYSTEM_CURL": "OFF",
+        "USE_SYSTEM_ZLIB": "OFF",
+        "USE_SYSTEM_LIBPNG": "OFF",
+        "USE_SYSTEM_OPENCV": "OFF",
+        "BUILD_LLVM": "OFF",
+        "STATIC_LINK_LLVM": "ON"
+      },
+      "environment": {
+        "CXX": "clang++",
+        "CC": "clang"
+      }
+    },
+    {
       "name": "gcc",
       "generator": "Ninja",
       "binaryDir": "build-gcc",
@@ -70,13 +95,9 @@
         }
       }
     }
-  ],
-  "buildPresets": [
-    {
-      "name": "msvc-debug",
-      "configurePreset": "msvc",
-      "configuration": "Debug"
-    },
+  ],"buildPresets": [
+    { "name": "mingw-clang", "configurePreset": "mingw-clang" },
+    { "name": "msvc-debug", "configurePreset": "msvc", "configuration": "Debug" },
     {
       "name": "msvc-release",
       "configurePreset": "msvc",

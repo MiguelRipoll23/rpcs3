@@ -230,6 +230,17 @@ enum class emu_settings_type
 	LimitCacheSize,
 	MaximumCacheSize,
 
+	// Metal Gear Online
+	MGODisableLimiter,
+	MGODisableHUD,
+	MGODisableLobbyBGM,
+	MGODisableMotionBlur,
+	MGOLowerExposure,
+	MGOSPUCullingWaitBypass,
+	MGOTaskAcceleration,
+	MGOAudioMixerFastPath,
+	MGOUPnPPort,
+
 	// Log
 	Log,
 };

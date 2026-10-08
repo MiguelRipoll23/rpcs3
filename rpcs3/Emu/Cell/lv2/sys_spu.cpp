@@ -11,6 +11,7 @@
 
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
+#include "Emu/Cell/SPUTaskHLE/ppu_task_hle.h"
 #include "Emu/Cell/timers.hpp"
 #include "Emu/Memory/vm_reservation.h"
 #include "sys_interrupt.h"
@@ -223,6 +224,15 @@ void sys_spu_image::deploy(u8* loc, std::span<const sys_spu_segment> segs, bool 
 		// Alternative patch
 		g_fxo->get<patch_engine>().apply(applied, Emu.GetTitleID() + '-' + hash, mem_translate);
 	}
+
+	// MGO: embedded SPU module hooks and image patches.
+	//
+	// This is the one point where the image is fully deployed to the local
+	// store, its "SPU-<sha1>" identity exists as a string, and the fork's own
+	// hook table can still rewrite it. The stock patch engine above handles
+	// YAML patches; this handles the compiled-in hook table, which is keyed on
+	// the same hash format.
+	spu_task_hle::ppu::on_embedded_spu_image(hash, {}, mem_translate, false);
 
 	(is_verbose ? spu_log.notice : sys_spu.trace)("Loaded SPU image: %s (<- %u)%s", hash, applied.size(), dump);
 }

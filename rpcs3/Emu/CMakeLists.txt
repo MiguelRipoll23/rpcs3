@@ -185,6 +185,21 @@ target_sources(rpcs3_emu PRIVATE
     Cell/SPUCommonRecompiler.cpp
     Cell/SPULLVMRecompiler.cpp
     Cell/SPUThread.cpp
+    Cell/SPUTaskHLE/ppu_task_hle.cpp
+    # Metal Gear Online fork.  The reference build keeps its MGO code in one
+    # translation unit, mgo_ppu_hooks.cpp (confirmed by its _GLOBAL__sub_I_
+    # symbol); this fork keeps that name and splits the rest alongside it.
+    mgo/mgo_ppu_hooks.cpp
+    mgo/ppu_geo_collision_hooks.cpp
+    mgo/ppu_modelsetup_hook.cpp
+    mgo/mgo_waits.cpp
+    mgo/drawassist_hooks.cpp
+    mgo/mgo_modelsetup.cpp
+    mgo/mgo_motion_play.cpp
+    mgo/mgo_pl_motion_mix.cpp
+    mgo/mgo_patches.cpp
+    mgo/mgo_integrity.cpp
+    mgo/mgo_integrity_hash.cpp
     Cell/lv2/lv2.cpp
     Cell/lv2/sys_bdemu.cpp
     Cell/lv2/sys_btsetting.cpp
@@ -709,3 +724,4 @@ endif()
 if(WAYLAND_FOUND)
     target_link_libraries(rpcs3_emu PRIVATE OpenGL::EGL)
 endif()
+

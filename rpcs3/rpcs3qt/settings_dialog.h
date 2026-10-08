@@ -71,4 +71,7 @@ private:
 
 	// Countries
 	void refresh_countrybox();
+
+	// Metal Gear Online tab (built programmatically, see .cpp)
+	void AddMGOTab();
 };

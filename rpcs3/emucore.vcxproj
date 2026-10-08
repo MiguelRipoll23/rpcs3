@@ -312,6 +312,19 @@
     <ClCompile Include="Emu\Cell\lv2\sys_rwlock.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_semaphore.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_spu.cpp" />
+    <ClCompile Include="Emu\Cell\SPUTaskHLE\ppu_task_hle.cpp" />
+    <ClCompile Include="Emu\mgo\mgo_ppu_hooks.cpp" />
+    <ClCompile Include="Emu\mgo\ppu_geo_collision_hooks.cpp" />
+    <ClCompile Include="Emu\mgo\ppu_modelsetup_hook.cpp" />
+    <ClCompile Include="Emu\mgo\mgo_waits.cpp" />
+    <ClCompile Include="Emu\mgo\drawassist_hooks.cpp" />
+    <ClCompile Include="Emu\mgo\mgo_modelsetup.cpp" />
+    <ClCompile Include="Emu\mgo\mgo_motion_play.cpp" />
+    <ClCompile Include="Emu\mgo\mgo_pl_motion_mix.cpp" />
+
+    <ClCompile Include="Emu\mgo\mgo_patches.cpp" />
+    <ClCompile Include="Emu\mgo\mgo_integrity.cpp" />
+    <ClCompile Include="Emu\mgo\mgo_integrity_hash.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_time.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_timer.cpp" />
     <ClCompile Include="Emu\Cell\lv2\sys_trace.cpp" />
@@ -895,6 +908,18 @@
     <ClInclude Include="Emu\Cell\lv2\sys_rwlock.h" />
     <ClInclude Include="Emu\Cell\lv2\sys_semaphore.h" />
     <ClInclude Include="Emu\Cell\lv2\sys_spu.h" />
+    <ClInclude Include="Emu\Cell\SPUTaskHLE\ppu_task_hle.h" />
+    <ClInclude Include="Emu\mgo\ppu_geo_collision_hooks.h" />
+    <ClInclude Include="Emu\mgo\ppu_modelsetup_hook.h" />
+    <ClInclude Include="Emu\mgo\mgo_waits.h" />
+    <ClInclude Include="Emu\mgo\drawassist_hooks.h" />
+    <ClInclude Include="Emu\mgo\mgo_modelsetup.h" />
+    <ClInclude Include="Emu\mgo\mgo_pl_motion_mix.h" />
+    <ClInclude Include="Emu\mgo\mgo_motion_play.h" />
+
+    <ClInclude Include="Emu\mgo\mgo_patches.h" />
+    <ClInclude Include="Emu\mgo\mgo_integrity.h" />
+    <ClInclude Include="Emu\mgo\mgo_integrity_hash.h" />
     <ClInclude Include="Emu\Cell\lv2\sys_sync.h" />
     <ClInclude Include="Emu\Cell\lv2\sys_time.h" />
     <ClInclude Include="Emu\Cell\lv2\sys_timer.h" />

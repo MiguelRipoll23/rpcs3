@@ -378,3 +378,13 @@ enum class vsync_mode
 	adaptive,
 	full,
 };
+
+// How aggressively the MGO2-specific PPU/SPU HLE hooks (rpcs3/Emu/Cell/SPUTaskHLE)
+// replace guest code. Higher levels enable more hooks.
+enum class mgo_task_acceleration
+{
+	off,
+	basic,
+	standard,
+	maximum,
+};

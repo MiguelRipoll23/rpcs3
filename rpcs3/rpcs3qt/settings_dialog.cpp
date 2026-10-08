@@ -1,4 +1,10 @@
 #include <QButtonGroup>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QGroupBox>
+#include <QLineEdit>
+#include <QFormLayout>
+#include <QVBoxLayout>
 #include <QCameraDevice>
 #include <QMediaDevices>
 #include <QDialogButtonBox>
@@ -254,6 +260,10 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	//   | |    |  ___/| |  | |    | |/ _` | '_ ＼
 	//   | |____| |    | |__| |    | | (_| | |_) |
 	//    \_____|_|     \____/     |_|\__,_|_.__/
+
+	// Metal Gear Online tab. Built here (rather than in the .ui) so the
+	// settings are declared in one place next to their tooltips.
+	AddMGOTab();
 
 	// Checkboxes
 
@@ -2739,4 +2749,131 @@ bool settings_dialog::eventFilter(QObject* object, QEvent* event)
 	}
 
 	return QDialog::eventFilter(object, event);
+}
+
+// ---------------------------------------------------------------------------
+// Metal Gear Online tab
+//
+// The savemgo fork exposes these under a dedicated "Metal Gear Online" page.
+// The widgets are created in code because they are not part of the .ui file,
+// and inserted right after the Network tab (index 5).
+// ---------------------------------------------------------------------------
+void settings_dialog::AddMGOTab()
+{
+	auto* page = new QWidget(ui->tab_widget_settings);
+	auto* page_layout = new QVBoxLayout(page);
+
+	auto* const make_groupbox = [page](const QString& title)
+	{
+		auto* group = new QGroupBox(title, page);
+		group->setFlat(false);
+		return group;
+	};
+
+	// --- Network Configuration ------------------------------------------------
+	auto* net_group = make_groupbox(tr("Network Configuration"));
+	auto* net_layout = new QFormLayout(net_group);
+
+	auto* bind_edit = new QLineEdit(net_group);
+	m_emu_settings->EnhanceLineEdit(bind_edit, emu_settings_type::BindAddress);
+	SubscribeTooltip(bind_edit, tr(
+		"The local IP address the emulator binds its listening sockets to.\n"
+		"\n"
+		"Leave this at 0.0.0.0 to listen on all available interfaces. Change it only if you need to restrict which interface MGO2 uses."));
+
+	auto* upnp_check = new QCheckBox(tr("Enable UPNP"), net_group);
+	m_emu_settings->EnhanceCheckBox(upnp_check, emu_settings_type::EnableUpnp);
+	SubscribeTooltip(upnp_check, tr(
+		"Uses UPnP to automatically open the required port on your router.\n"
+		"\n"
+		"If the port cannot be opened automatically, set it manually in your router's forwarding table."));
+
+	auto* derive_check = new QCheckBox(tr("Derive ethernet address from PSID"), net_group);
+	m_emu_settings->EnhanceCheckBox(derive_check, emu_settings_type::DeriveMacFromPsid);
+	SubscribeTooltip(derive_check, tr(
+		"Derives the emulated console's MAC address from its PSID instead of using a fixed one.\n"
+		"\n"
+		"Some servers bind the console identity to the MAC address, so a stable value derived from the PSID keeps it consistent between runs."));
+
+	net_layout->addRow(tr("Bind address"), bind_edit);
+	net_layout->addRow(upnp_check);
+	net_layout->addRow(derive_check);
+
+	// --- Configuration --------------------------------------------------------
+	auto* cfg_group = make_groupbox(tr("Configuration"));
+	auto* cfg_layout = new QFormLayout(cfg_group);
+
+	const auto add_check = [&](emu_settings_type type, const QString& text, const QString& tooltip)
+	{
+		auto* box = new QCheckBox(text, cfg_group);
+		m_emu_settings->EnhanceCheckBox(box, type);
+		SubscribeTooltip(box, tooltip);
+		cfg_layout->addRow(box);
+		return box;
+	};
+
+	add_check(emu_settings_type::MGODisableHUD, tr("Disable HUD"), tr(
+		"Hides the in-game heads-up display.\n"
+		"\n"
+		"Removes the health/stamina gauges and other on-screen indicators from the game."));
+
+	add_check(emu_settings_type::MGODisableMotionBlur, tr("Disable Motion Blur"), tr(
+		"Disables the in-game motion blur effect.\n"
+		"\n"
+		"Improves clarity during fast camera movement at the cost of some intended visual effects."));
+
+	add_check(emu_settings_type::MGODisableLimiter, tr("Disable Frame Limiter"), tr(
+		"Removes the emulated 60 FPS frame limit.\n"
+		"\n"
+		"Use together with V-Sync off to let the game run as fast as the host can render it."));
+
+	add_check(emu_settings_type::MGODisableLobbyBGM, tr("Disable Lobby BGM"), tr(
+		"Mutes the background music that plays in the lobby and menus.\n"
+		"\n"
+		"Useful when the lobby music interferes with voice chat."));
+
+	add_check(emu_settings_type::MGOLowerExposure, tr("Reduce Sky Brightness"), tr(
+		"Reduces the brightness of the sky.\n"
+		"\n"
+		"MGO2 renders a noticeably bright sky that can wash out the scene."));
+
+	add_check(emu_settings_type::MGOSPUCullingWaitBypass, tr("SPU Culling Wait Bypass"), tr(
+		"Bypasses the SPU spin-wait used while waiting on geometry culling results.\n"
+		"\n"
+		"This removes a stall in stages with heavy visibility culling."));
+
+	add_check(emu_settings_type::MGOAudioMixerFastPath, tr("Audio Mixer Fast Path (lossy)"), tr(
+		"Uses a faster, slightly lossy audio mixing path.\n"
+		"\n"
+		"Improves mixing throughput at the cost of a small amount of audio precision."));
+
+	auto* accel_box = new QComboBox(cfg_group);
+	m_emu_settings->EnhanceComboBox(accel_box, emu_settings_type::MGOTaskAcceleration);
+	SubscribeTooltip(accel_box, tr(
+		"Controls how aggressively MGO2's SPU/PPU tasks are replaced by host implementations.\n"
+		"\n"
+		"Higher levels replace more guest code and can improve performance, at the cost of accuracy. "
+		"If the game misbehaves, lower this setting."));
+
+	cfg_layout->addRow(tr("Task Acceleration"), accel_box);
+
+	page_layout->addWidget(net_group);
+	page_layout->addWidget(cfg_group);
+	page_layout->addStretch(1);
+
+	// Insert after the Network tab (index 5).
+	constexpr int mgo_tab_index = 6;
+	ui->tab_widget_settings->insertTab(mgo_tab_index, page, tr("Metal Gear Online"));
+
+	// eventFilter() maps the current tab index into m_description_labels, so a
+	// placeholder has to be inserted at the matching position to keep the
+	// existing tabs aligned.
+	auto* desc = new QLabel(page);
+	desc->setTextFormat(Qt::TextFormat::PlainText);
+	desc->setAlignment(Qt::AlignmentFlag::AlignLeading | Qt::AlignmentFlag::AlignLeft | Qt::AlignmentFlag::AlignTop);
+	desc->setWordWrap(true);
+	desc->setObjectName("description_mgo");
+	desc->setText(tr("Point your mouse at an option to display a description in here.\n\n\n"));
+	const auto it = m_description_labels.begin() + std::min<usz>(mgo_tab_index, m_description_labels.size());
+	m_description_labels.insert(it, std::make_pair(desc, desc->text()));
 }

@@ -12,6 +12,27 @@
 #include "util/sysinfo.hpp"
 
 #include <QApplication>
+
+// ---------------------------------------------------------------------------
+// Update source configuration.
+//
+// This fork self-updates from its own build repository rather than from the
+// official RPCS3 feed. Retarget the fork by editing these three constants -
+// they are the only place the upstream endpoints are hardcoded.
+//
+//   kUpdateFeedUrl       manifest endpoint (must return the RPCS3 v3 JSON
+//                        schema that handle_json() parses)
+//   kAllowedDownloadBase downloads must start with this prefix
+//   kRepoWebBase         used to build the pull-request links in the changelog
+//
+// See MGO_FORK.md for the manifest format.
+// ---------------------------------------------------------------------------
+namespace
+{
+	constexpr std::string_view kUpdateFeedUrl = "https://update.rpcs3.net/?api=v3&c=%s&os_type=%s&os_arch=%s&os_version=%i.%i.%i";
+	constexpr std::string_view kAllowedDownloadBase = "https://github.com/RPCS3/rpcs3";
+	constexpr std::string_view kRepoWebBase = "https://github.com/RPCS3/rpcs3";
+}
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDialogButtonBox>
@@ -112,7 +133,7 @@ void update_manager::check_for_updates(bool automatic, bool check_only, bool aut
 
 	const utils::OS_version os = utils::get_OS_version();
 
-	const std::string url = fmt::format("https://update.rpcs3.net/?api=v3&c=%s&os_type=%s&os_arch=%s&os_version=%i.%i.%i",
+	const std::string url = fmt::format(kUpdateFeedUrl,
 		rpcs3::get_commit_and_hash().second, os.type, os.arch, os.version_major, os.version_minor, os.version_patch);
 
 	m_downloader->start(url, true, !automatic, true, tr("Checking For Updates"), true);
@@ -245,7 +266,7 @@ bool update_manager::handle_json(bool automatic, bool check_only, bool auto_acce
 	m_expected_hash = latest[os]["checksum"].toString().toStdString();
 	m_expected_size = latest[os]["size"].toInt();
 
-	if (!m_request_url.starts_with("https://github.com/RPCS3/rpcs3"))
+	if (!m_request_url.starts_with(kAllowedDownloadBase))
 	{
 		update_log.fatal("Bad url: %s", m_request_url);
 		return false;
@@ -388,7 +409,7 @@ void update_manager::update(bool auto_accept, bool is_first_call)
 
 			if (entry.pr > 0)
 			{
-				entry_html = tr("&nbsp;&nbsp;&bull; %0: %1 (<a href=\"https://github.com/RPCS3/rpcs3/pull/%2\">#%2</a>)").arg(version_str, title_str, QString::number(entry.pr));
+				entry_html = tr("&nbsp;&nbsp;&bull; %0: %1 (<a href=\"%2/pull/%3\">#%3</a>)").arg(version_str, title_str, QString::fromStdString(std::string{kRepoWebBase}), QString::number(entry.pr));
 			}
 			else
 			{

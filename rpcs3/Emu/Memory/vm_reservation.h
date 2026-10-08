@@ -40,13 +40,19 @@ namespace vm
 		u32 waiters_count = 0;
 	};
 
+	// Hoisted out of reservation_notifier() so that code outside this header can
+	// name it too. spu_task_hle::mgo_waits bumps a byte of this table directly:
+	// the reference build's mgo lwarx wait loads its base with
+	// `lea rdi, [rip + ...]` against the symbol g_resrv_waiters_count. The size
+	// must stay in step with the definition in SPUThread.cpp.
+	inline constexpr u32 wait_vars_for_each = 32;
+	inline constexpr u32 unique_address_bit_mask = 0b1111;
+	inline constexpr u32 unique_rtime_bit_mask = 0b1;
+
+	extern std::array<atomic_t<reservation_waiter_t, 128>, wait_vars_for_each * (unique_address_bit_mask + 1) * (unique_rtime_bit_mask + 1)> g_resrv_waiters_count;
+
 	static inline atomic_t<reservation_waiter_t, 128>* reservation_notifier(u32 raddr, u64 rtime)
 	{
-		constexpr u32 wait_vars_for_each = 32;
-		constexpr u32 unique_address_bit_mask = 0b1111;
-		constexpr u32 unique_rtime_bit_mask = 0b1;
-
-		extern std::array<atomic_t<reservation_waiter_t, 128>, wait_vars_for_each * (unique_address_bit_mask + 1) * (unique_rtime_bit_mask + 1)> g_resrv_waiters_count;
 
 		// Storage efficient method to distinguish different nearby addresses (which are likely)
 		const usz index = std::min<usz>(std::popcount(raddr & -2048), 31) * (1 << 5) + ((rtime / 128) & unique_rtime_bit_mask) * (1 << 4) + ((raddr / 128) & unique_address_bit_mask);

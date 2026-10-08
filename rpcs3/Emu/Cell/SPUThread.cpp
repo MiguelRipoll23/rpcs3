@@ -21,6 +21,8 @@
 #include "Emu/Cell/SPUAnalyser.h"
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/Cell/SPURecompiler.h"
+#include "Emu/Cell/SPUTaskHLE/ppu_task_hle.h"
+#include "Emu/mgo/mgo_waits.h"
 #include "Emu/Cell/timers.hpp"
 
 #include "Emu/RSX/Core/RSXReservationLock.hpp"
@@ -1249,6 +1251,12 @@ void spu_thread::dump_misc(std::string& ret, std::any& custom_data) const
 
 void spu_thread::cpu_on_stop()
 {
+	// MGO: give the task-HLE framework a chance to join work this thread owned.
+	// The fork's spu_task_hle::on_stop(spu_thread&, u32) is a tail call from its
+	// equivalent of this function, and exists so the parallel modelsetup pool
+	// does not leak a job when the thread that started it goes away.
+	spu_task_hle::on_stop(*this, 0);
+
 	if (current_func && is_stopped(state - cpu_flag::stop))
 	{
 		if (start_time)
@@ -4193,6 +4201,24 @@ bool spu_thread::process_mfc_cmd()
 	{
 		perf_meter<"GETLLAR"_u64> perf0;
 
+		// Metal Gear Online reads gpr1 for something unrelated to the
+		// load-link address, which produces a GETLLAR whose gpr1 does not
+		// behave like an address. The fork recognises that case by a
+		// four-word signature in the local store at +0x3000 and then ignores
+		// gpr1 rather than servicing the trap.
+		//
+		// Recovered from the inlined copy in this function, at 0x1431e6476 in
+		// the reference build: inside a lambda in process_mfc_cmd, gated on
+		// `task_acceleration >= 2` and the four compares against
+		// 0x027a8043 / 0x82a2a543 / 0x02433943 / 0x824fb142.
+		//
+		// Note the reference build inverts it: `sete r8b` followed by
+		// `xor r8b, 1` means its branch fires when the signature does *not*
+		// match, so the signature is what keeps the thread on the normal
+		// path. Either way the predicate is the same four-word test, which is
+		// what geo_getllar_ignore_gpr1() answers.
+		const bool mgo_ignores_gpr1 = spu_task_hle::mgo_waits::geo_getllar_ignore_gpr1(*this);
+
 		const u32 addr = ch_mfc_cmd.eal & -128;
 		const auto& data = vm::_ref<spu_rdata_t>(addr);
 
@@ -4254,7 +4280,15 @@ bool spu_thread::process_mfc_cmd()
 						if ([&]() -> bool
 						{
 							// Validation that it is indeed GETLLAR spinning (large time window is intentional)
-							if (last_getllar_addr != addr || last_getllar_gpr1 != gpr[1]._u32[3] || perf0.get() - last_gtsc >= 5'000 || (interrupts_enabled && ch_events.load().mask))
+							//
+							// `mgo_ignores_gpr1` is the fork's own signature test, folded
+							// into this predicate in the reference build: when the four
+							// words are present in the local store the guest is not really
+							// load-linking, so gpr[1] is not an address and comparing it
+							// against the remembered value would report a "new" spin on
+							// every iteration and defeat the counter below. This is the
+							// inlined geo_getllar_ignore_gpr1() from 0x1431e6476.
+							if (last_getllar_addr != addr || (!mgo_ignores_gpr1 && last_getllar_gpr1 != gpr[1]._u32[3]) || perf0.get() - last_gtsc >= 5'000 || (interrupts_enabled && ch_events.load().mask))
 							{
 								// Seemingly not
 								getllar_busy_waiting_switch = umax;

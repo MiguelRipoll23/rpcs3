@@ -7,11 +7,13 @@
 #include "Emu/Memory/vm.h"
 #include "Emu/System.h"
 #include "Emu/VFS.h"
+#include "Emu/mgo/mgo_patches.h"
 
 #include "util/types.hpp"
 #include "util/asm.hpp"
 
 #include <charconv>
+#include <cstring>
 #include <regex>
 #include <vector>
 
@@ -906,6 +908,53 @@ void patch_engine::append_title_patches(std::string_view title_id)
 	load(m_map, fmt::format("%s%s_patch.yml", get_patches_path(), title_id));
 }
 
+void patch_engine::append_builtin_patches(std::string_view content)
+{
+	if (content.empty())
+	{
+		return;
+	}
+
+	patch_map builtin;
+
+	// importing = true: do not consult the user's patch_config.yml, the caller
+	// decides whether these built-ins are active (gated by the MGO settings).
+	if (!load(builtin, "<builtin>", std::string(content), true))
+	{
+		patch_log.error("Failed to load built-in patch data");
+		return;
+	}
+
+	// apply() skips patches whose config_values.enabled is false. Built-ins are
+	// gated by an emulator setting rather than by the user's patch_config.yml,
+	// so enable every (title, serial, version) combination that was parsed.
+	for (auto& [hash, container] : builtin)
+	{
+		for (auto& [description, info] : container.patch_info_map)
+		{
+			for (auto& [title, serials] : info.titles)
+			{
+				for (auto& [serial, app_versions] : serials)
+				{
+					for (auto& [app_version, config_values] : app_versions)
+					{
+						config_values.enabled = true;
+					}
+				}
+			}
+		}
+
+		// Don't clobber a user patch that happens to share the same hash.
+		if (m_map.contains(hash))
+		{
+			patch_log.notice("Built-in patch for hash '%s' skipped (overridden by user patch)", hash);
+			continue;
+		}
+
+		m_map[hash] = std::move(container);
+	}
+}
+
 void unmap_vm_area(std::shared_ptr<vm::block_t>& ptr)
 {
 	if (ptr && ptr->flags & (1ull << 62))
@@ -1458,6 +1507,26 @@ static usz apply_modification(std::vector<u32>& applied, patch_engine::patch_inf
 void patch_engine::apply(std::vector<u32>& applied_total, const std::string& name, std::function<u8*(u32, u32)> mem_translate, u32 filesz, u32 min_addr)
 {
 	// applied_total may be non-empty, do not clear it
+
+	// The SaveMGO fork inlines its MGO2 guest patches at the very top of this
+	// function, before the m_map lookup, guarded only by a comparison of the
+	// module name against the MGO2 executable hash.  They are not patch_config
+	// entries: each is a 4-byte write whose presence is gated on one g_cfg.mgo
+	// key.  Reproduced here so the ordering matches -- these land before any
+	// regular patch for the same module.
+	if (mgo_patches::is_mgo2_exec(name))
+	{
+		for (const auto& patch : mgo_patches::select_guest_word_patches())
+		{
+			if (u8* ptr = mem_translate(patch.offset, 4))
+			{
+				// The fork stores the immediate verbatim (a plain `mov dword` on
+				// x86), so the value is little-endian and is not byte-swapped.
+				std::memcpy(ptr, &patch.value, sizeof(patch.value));
+				applied_total.emplace_back(patch.offset);
+			}
+		}
+	}
 
 	if (!m_map.contains(name))
 	{

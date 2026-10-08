@@ -227,6 +227,21 @@ std::optional<s32> lv2_socket_native::connect(const sys_net_sockaddr& addr)
 		return -SYS_NET_EADDRNOTAVAIL;
 	}
 
+	// MGO: over TCP the game may only reach the SaveMGO server. The fork
+	// compares the raw network-order address against one endpoint and accepts
+	// either of two ports regardless of the address.
+	if (type == SYS_NET_SOCK_STREAM)
+	{
+		const u16 port = std::bit_cast<u16, be_t<u16>>(native_addr.sin_port);
+
+		if (native_addr.sin_addr.s_addr != 0xe7efcc0f && port != 0x5000 && port != 0xbb01)
+		{
+			sys_net.error("[Native] Rejected TCP connection to %s:%d (only the SaveMGO server is allowed)", native_addr.sin_addr, std::bit_cast<be_t<u16>, u16>(native_addr.sin_port));
+
+			return -SYS_NET_ECONNREFUSED;
+		}
+	}
+
 	if (psa_in->sin_port == 53)
 	{
 		// Add socket to the dns hook list

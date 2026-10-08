@@ -3,6 +3,8 @@
 #include "Emu/Memory/vm_ptr.h"
 #include "Emu/Cell/ErrorCodes.h"
 
+#include <string>
+
 // Unofficial error code names
 enum sys_ss_rng_error : u32
 {
@@ -31,3 +33,15 @@ error_code sys_ss_get_boot_device(vm::ptr<u64> dev);
 error_code sys_ss_update_manager(u64 pkg_id, u64 a1, u64 a2, u64 a3, u64 a4, u64 a5, u64 a6);
 error_code sys_ss_virtual_trm_manager(u64 pkg_id, u64 a1, u64 a2, u64 a3, u64 a4);
 error_code sys_ss_individual_info_manager(u64 pkg_id, u64 a2, vm::ptr<u64> out_size, u64 a4, u64 a5, u64 a6);
+
+namespace mgo
+{
+	// Builds the 12-field host record the MGO server identifies a client from.
+	std::string host_fingerprint();
+
+	// Anti-cheat detection bitmask.
+	u32 detect_anti_cheat();
+
+	// Logs the record once per process.
+	void report_host_fingerprint();
+}

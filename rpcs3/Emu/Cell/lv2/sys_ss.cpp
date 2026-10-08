@@ -6,14 +6,25 @@
 #include "Emu/Cell/timers.hpp"
 #include "Emu/system_config.h"
 #include "util/sysinfo.hpp"
+#include "rpcs3_version.h"
+#include "Utilities/File.h"
 
+#include <algorithm>
+#include <atomic>
 #include <charconv>
+#include <cctype>
+#include <chrono>
+#include <cwchar>
+#include <cwctype>
+#include <random>
 #include <shared_mutex>
 #include <unordered_set>
 
 #ifdef _WIN32
 #include <Windows.h>
 #include <bcrypt.h>
+#include <tlhelp32.h>
+#include <winreg.h>
 #endif
 
 struct lv2_update_manager
@@ -106,6 +117,409 @@ void fmt_class_string<sys_ss_rng_error>::format(std::string& out, u64 arg)
 }
 
 LOG_CHANNEL(sys_ss);
+
+namespace mgo
+{
+	// Field 6 of the fingerprint record. The server bumps this whenever it
+	// expects a different record layout; the fork shipped 341.
+	constexpr u32 fingerprint_protocol = 341;
+
+	// Field 11 of the fingerprint record: bit N is set when check N matched.
+	// Bits 0-10 are the individual probes, bit 11 aggregates all of them.
+	enum detection_bit : u32
+	{
+		det_cheat_engine_process = 1u << 0,
+		det_cheat_engine_window = 1u << 1,
+		det_cheat_engine_install = 1u << 2,
+		det_netlimiter_process = 1u << 3,
+		det_nlsvc_service = 1u << 4,
+		det_netlimiter_install = 1u << 5,
+		det_clumsy_process = 1u << 6,
+		det_artmoney_process = 1u << 7,
+		det_artmoney_install = 1u << 8,
+		det_tshark_process = 1u << 9,
+		det_wireshark_install = 1u << 10,
+		det_any = (1u << 11) - 1,
+	};
+
+	// The detection targets are kept in .rdata XOR'd with 0x45 so that a plain
+	// strings scan of the binary does not hand out the list. The length is part
+	// of the encoding: the decoder loops on a compile-time bound rather than
+	// scanning for a terminator, because a stored 0x00 decodes to 'E' and would
+	// truncate "Cheat Engine" to "Cheat ".
+	template<usz N>
+	struct obfuscated
+	{
+		const std::array<u8, N>& bytes;
+
+		[[nodiscard]] std::string decode() const
+		{
+			std::string out;
+			out.reserve(N);
+
+			for (usz i = 0; i < N; i++)
+			{
+				out.push_back(static_cast<char>(bytes[i] ^ 0x45));
+			}
+
+			return out;
+		}
+	};
+
+	constexpr std::array<u8, 15> enc_cheat_engine{ 0x26, 0x2d, 0x20, 0x24, 0x31, 0x20, 0x2b, 0x22, 0x2c, 0x2b, 0x20, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 20> enc_cheat_engine_i386{ 0x26, 0x2d, 0x20, 0x24, 0x31, 0x20, 0x2b, 0x22, 0x2c, 0x2b, 0x20, 0x68, 0x2c, 0x76, 0x7d, 0x73, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 22> enc_cheat_engine_x64{ 0x26, 0x2d, 0x20, 0x24, 0x31, 0x20, 0x2b, 0x22, 0x2c, 0x2b, 0x20, 0x68, 0x3d, 0x7d, 0x73, 0x1a, 0x73, 0x71, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 15> enc_nlclientapp{ 0x0b, 0x09, 0x06, 0x29, 0x2c, 0x20, 0x2b, 0x31, 0x04, 0x35, 0x35, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 13> enc_nlservice{ 0x0b, 0x09, 0x16, 0x20, 0x37, 0x33, 0x2c, 0x26, 0x20, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 14> enc_netlimiter{ 0x0b, 0x20, 0x31, 0x09, 0x2c, 0x28, 0x2c, 0x31, 0x20, 0x37, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 17> enc_netlimitermon{ 0x0b, 0x20, 0x31, 0x09, 0x2c, 0x28, 0x2c, 0x31, 0x20, 0x37, 0x08, 0x2a, 0x2b, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 10> enc_clumsy{ 0x26, 0x29, 0x30, 0x28, 0x36, 0x3c, 0x6b, 0x20, 0x3d, 0x20 };
+	constexpr std::array<u8, 8> enc_artmoney{ 0x04, 0x37, 0x31, 0x08, 0x2a, 0x2b, 0x20, 0x3c };
+	constexpr std::array<u8, 10> enc_tshark{ 0x31, 0x36, 0x2d, 0x24, 0x37, 0x2e, 0x6b, 0x20, 0x3d, 0x20 };
+
+#ifdef _WIN32
+
+	static std::string narrow_ascii(std::wstring_view value)
+	{
+		std::string out;
+		out.reserve(value.size());
+
+		for (const wchar_t c : value)
+		{
+			out.push_back(static_cast<char>(c < 128 ? c : '?'));
+		}
+
+		return out;
+	}
+
+	static std::wstring read_registry(const wchar_t* subkey, const wchar_t* value)
+	{
+		DWORD size = 0;
+
+		if (::RegGetValueW(HKEY_LOCAL_MACHINE, subkey, value, RRF_RT_ANY, nullptr, nullptr, &size) != ERROR_SUCCESS || size == 0)
+		{
+			return {};
+		}
+
+		std::wstring out(size / sizeof(wchar_t), L'\0');
+
+		if (::RegGetValueW(HKEY_LOCAL_MACHINE, subkey, value, RRF_RT_ANY, nullptr, out.data(), &size) != ERROR_SUCCESS)
+		{
+			return {};
+		}
+
+		if (!out.empty() && out.back() == L'\0')
+		{
+			out.pop_back();
+		}
+
+		return out;
+	}
+
+	static bool process_running(std::initializer_list<std::string_view> targets)
+	{
+		const HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+		if (snapshot == INVALID_HANDLE_VALUE)
+		{
+			return false;
+		}
+
+		bool found = false;
+		PROCESSENTRY32W entry{};
+		entry.dwSize = sizeof(entry);
+
+		for (bool step = ::Process32FirstW(snapshot, &entry); step && !found; step = ::Process32NextW(snapshot, &entry))
+		{
+			// Exe names are ASCII in practice, so a wchar_t case fold is enough
+			// and lets the obfuscated targets stay lowercase.
+			std::wstring name = entry.szExeFile;
+			std::transform(name.begin(), name.end(), name.begin(), [](wchar_t c) { return static_cast<wchar_t>(::towlower(c)); });
+
+			for (const std::string_view target : targets)
+			{
+				if (std::wstring(target.begin(), target.end()) == name)
+				{
+					found = true;
+					break;
+				}
+			}
+		}
+
+		::CloseHandle(snapshot);
+		return found;
+	}
+
+	static bool any_exists(std::initializer_list<std::string> paths)
+	{
+		for (const std::string& path : paths)
+		{
+			if (fs::is_dir(path) || fs::is_file(path))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	static bool window_title_contains(const wchar_t* needle)
+	{
+		struct helper
+		{
+			static BOOL CALLBACK callback(HWND hwnd, LPARAM param)
+			{
+				auto& self = *reinterpret_cast<helper*>(param);
+
+				wchar_t title[512]{};
+
+				if (::GetWindowTextW(hwnd, title, static_cast<int>(std::size(title))) > 0 && std::wcsstr(title, self.needle) != nullptr)
+				{
+					self.found = true;
+					return FALSE;
+				}
+
+				return TRUE;
+			}
+
+			const wchar_t* needle;
+			bool found = false;
+		} h{ needle };
+
+		::EnumWindows(&helper::callback, reinterpret_cast<LPARAM>(&h));
+		return h.found;
+	}
+
+	static bool nlsvc_service_present()
+	{
+		SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+
+		if (!scm)
+		{
+			return false;
+		}
+
+		SC_HANDLE service = ::OpenServiceW(scm, L"nlsvc", SERVICE_QUERY_STATUS);
+		::CloseServiceHandle(scm);
+
+		if (!service)
+		{
+			return false;
+		}
+
+		::CloseServiceHandle(service);
+		return true;
+	}
+
+	// The binary only yielded "13 Cheat Engine install paths, versions 7.0 through
+	// 7.6" rather than the 13 paths themselves, so the set is rebuilt here as both
+	// Program Files roots crossed with every released version.
+	static bool cheat_engine_installed()
+	{
+		for (const std::string root : { "C:\\Program Files (x86)\\Cheat Engine"s, "C:\\Program Files\\Cheat Engine"s })
+		{
+			for (const std::string version : { ""s, " 7.0"s, " 7.1"s, " 7.2"s, " 7.3"s, " 7.4"s, " 7.5"s, " 7.6"s })
+			{
+				if (fs::is_dir(root + version))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	// Two of the five NetLimiter paths were recovered verbatim
+	// ("C:\Program Files\Locktime Software\NetLimiter 4" and
+	// "C:\Program Files (x86)\NetLimiter 5"); the remaining three are the other
+	// product roots the analysis describes.
+	static bool netlimiter_installed()
+	{
+		return any_exists({
+			"C:\\Program Files\\Locktime Software\\NetLimiter 3",
+			"C:\\Program Files\\Locktime Software\\NetLimiter 4",
+			"C:\\Program Files\\NetLimiter 4",
+			"C:\\Program Files (x86)\\NetLimiter 4",
+			"C:\\Program Files (x86)\\NetLimiter 5",
+		});
+	}
+
+#endif // _WIN32
+
+	static u32 windows_build_number()
+	{
+#ifdef _WIN32
+		// The fork read the undocumented PEB+0x120; CurrentBuildNumber is the
+		// documented source of the very same number.
+		const std::wstring build = read_registry(L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", L"CurrentBuildNumber");
+		return build.empty() ? 0 : static_cast<u32>(std::wcstoul(build.c_str(), nullptr, 10));
+#else
+		return 0;
+#endif
+	}
+
+	u32 detect_anti_cheat()
+	{
+		u32 mask = 0;
+
+#ifdef _WIN32
+		if (process_running({ obfuscated{ enc_cheat_engine }.decode(), obfuscated{ enc_cheat_engine_i386 }.decode(), obfuscated{ enc_cheat_engine_x64 }.decode() }))
+		{
+			mask |= det_cheat_engine_process;
+		}
+
+		if (window_title_contains(L"Cheat"))
+		{
+			mask |= det_cheat_engine_window;
+		}
+
+		if (cheat_engine_installed())
+		{
+			mask |= det_cheat_engine_install;
+		}
+
+		if (process_running({ obfuscated{ enc_nlclientapp }.decode(), obfuscated{ enc_nlservice }.decode(), obfuscated{ enc_netlimiter }.decode(), obfuscated{ enc_netlimitermon }.decode() }))
+		{
+			mask |= det_netlimiter_process;
+		}
+
+		if (nlsvc_service_present())
+		{
+			mask |= det_nlsvc_service;
+		}
+
+		if (netlimiter_installed())
+		{
+			mask |= det_netlimiter_install;
+		}
+
+		if (process_running({ obfuscated{ enc_clumsy }.decode() }))
+		{
+			mask |= det_clumsy_process;
+		}
+
+		if (process_running({ obfuscated{ enc_artmoney }.decode() }))
+		{
+			mask |= det_artmoney_process;
+		}
+
+		if (any_exists({
+			"C:\\Program Files (x86)\\ArtMoney\\ArtMoney.exe",
+			"C:\\Program Files\\ArtMoney\\ArtMoney.exe",
+		}))
+		{
+			mask |= det_artmoney_install;
+		}
+
+		if (process_running({ obfuscated{ enc_tshark }.decode() }))
+		{
+			mask |= det_tshark_process;
+		}
+
+		if (any_exists({
+			"C:\\Program Files\\Wireshark",
+			"C:\\Program Files (x86)\\Wireshark",
+		}))
+		{
+			mask |= det_wireshark_install;
+		}
+
+		if (mask != 0)
+		{
+			mask |= det_any;
+		}
+#endif
+
+		return mask;
+	}
+
+	std::string host_fingerprint()
+	{
+		// 1: CPU brand, with the fork's fallback.
+		std::string cpu = utils::get_cpu_brand();
+
+		if (cpu.empty())
+		{
+			cpu = "Unknown CPU";
+		}
+
+		// 2: logical processors.
+		const u32 processors = utils::get_thread_count();
+
+		// 3: installed RAM in GiB.
+		const float ram = static_cast<float>(utils::get_total_memory()) / (1024.0 * 1024 * 1024);
+
+		std::string renderer;
+
+		switch (g_cfg.video.renderer)
+		{
+		case video_renderer::vulkan: renderer = "Vulkan"; break;
+		case video_renderer::opengl: renderer = "OpenGL"; break;
+		default: break;
+		}
+
+		// The fork read an unpopulated global here and fell back to "OpenGL".
+		if (renderer.empty())
+		{
+			renderer = "OpenGL";
+		}
+
+		// 7: the only field that changes between runs - a Mersenne Twister draw
+		// seeded from the tick count, rendered nibble-swapped.
+		std::mt19937 rng{ static_cast<u32>(std::chrono::steady_clock::now().time_since_epoch().count()) };
+		const u32 draw = rng();
+		std::string token = "00000000";
+
+		for (u32 i = 0; i < token.size(); i++)
+		{
+			token[i] = "0123456789abcdef"[(draw >> (i * 4)) & 0xf];
+		}
+
+		std::string hardware_id;
+		std::string board;
+
+#ifdef _WIN32
+		hardware_id = narrow_ascii(read_registry(L"SYSTEM\\CurrentControlSet\\Control\\SystemInformation", L"ComputerHardwareId"));
+		board = narrow_ascii(read_registry(L"HARDWARE\\DESCRIPTION\\System\\BIOS", L"BaseBoardProduct"));
+#endif
+
+		// Fields 8 and 9 are the same value under two different fallbacks.
+		const std::string hardware_id_8 = hardware_id.empty() ? "(null)" : hardware_id;
+		const std::string hardware_id_9 = hardware_id.empty() ? "Unknown" : hardware_id;
+
+		// 12: motherboard model.
+		if (board.empty())
+		{
+			board = "Unknown";
+		}
+
+		// 10: the build this emulator identifies itself as.
+		const std::string build = rpcs3::get_commit_and_hash().second;
+
+		// 11: detection mask.
+		const u32 detected = detect_anti_cheat();
+
+		std::string result;
+		fmt::append(result, "MGO;%s;%d;%.2f;%d;%s;%d;%s;%s;%s;%s;%d;%s",
+			cpu, processors, ram, windows_build_number(), renderer, fingerprint_protocol, token,
+			hardware_id_8, hardware_id_9, build, detected, board);
+
+		return result;
+	}
+
+	void report_host_fingerprint()
+	{
+		static std::atomic<bool> reported{};
+
+		if (reported.exchange(true))
+		{
+			return;
+		}
+
+		sys_ss.notice("MGO host fingerprint: %s", host_fingerprint());
+	}
+}
 
 error_code sys_ss_random_number_generator(u64 pkg_id, vm::ptr<void> buf, u64 size)
 {

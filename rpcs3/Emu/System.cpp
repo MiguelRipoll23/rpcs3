@@ -10,6 +10,8 @@
 #include "Emu/vfs_config.h"
 #include "Emu/IPC_config.h"
 #include "Emu/savestate_utils.hpp"
+#include "Emu/mgo/mgo_integrity.h"
+#include "Emu/mgo/mgo_patches.h"
 #include "Emu/cache_utils.hpp"
 
 #include "Emu/Cell/ErrorCodes.h"
@@ -82,6 +84,12 @@ extern void spu_load_rel_exec(const spu_rel_object&);
 extern void ppu_precompile(std::vector<std::string>& dir_queue, std::vector<ppu_module<lv2_obj>*>* loaded_prx, bool is_fast_compilation);
 extern bool ppu_initialize(const ppu_module<lv2_obj>&, bool check_only = false, u64 file_size = 0);
 extern void ppu_finalize(const ppu_module<lv2_obj>&);
+
+// MGO PPU/SPU hook framework teardown (rpcs3/Emu/Cell/SPUTaskHLE).
+namespace spu_task_hle
+{
+	void reset();
+}
 extern void ppu_unload_prx(const lv2_prx&);
 extern shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object&, bool virtual_load, const std::string&, s64 = 0, utils::serial* = nullptr);
 extern std::pair<shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, bool virtual_load, const std::string& path, s64 = 0, utils::serial* = nullptr);
@@ -410,6 +418,13 @@ extern void dump_executable(std::span<const u8> data, const ppu_module<lv2_obj>*
 
 void Emulator::Init()
 {
+	// The fork verifies its own .text before anything else happens (in
+	// rt_support_init(), ahead of main()).  Running it first here is the same
+	// ordering that matters: before any patch engine, save state or HLE hook has
+	// had a chance to alter the image.  The digest is a build-time constant and
+	// has to be regenerated whenever .text changes -- see buildfiles/mgo_digest.py.
+	mgo_integrity::verify(" at startup");
+
 	// Log LLVM version
 	if (static bool logged_llvm = false; !logged_llvm)
 	{
@@ -1727,6 +1742,9 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 			// Load patches from different locations
 			g_fxo->get<patch_engine>().append_global_patches();
 			g_fxo->get<patch_engine>().append_title_patches(m_title_id);
+
+			// Built-in Metal Gear Online patches, gated by the MGO settings.
+			mgo_patches::register_builtin(g_fxo->get<patch_engine>());
 		}
 
 		// Set bdvd_dir
@@ -3439,6 +3457,10 @@ void Emulator::Kill(bool allow_autoexit, bool savestate, savestate_stage* save_s
 
 	const auto reset_emu_state = [this]()
 	{
+		// MGO: drop the PPU hook table before the guest memory it patches goes
+		// away, so no thread can look up a stale call site.
+		spu_task_hle::reset();
+
 		m_ar.reset();
 		argv.clear();
 		envp.clear();

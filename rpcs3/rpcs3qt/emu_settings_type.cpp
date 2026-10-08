@@ -243,6 +243,20 @@ const std::map<emu_settings_type, cfg_location> settings_location =
 	{ emu_settings_type::CompatibleEmulationSavestateMode,    get_cfg_location(local_cfg.savestate.compatible_mode) },
 	{ emu_settings_type::StartSavestatePaused,                get_cfg_location(local_cfg.savestate.start_paused) },
 
+	// Metal Gear Online
+	{ emu_settings_type::MGODisableLimiter,          get_cfg_location(local_cfg.mgo.disable_limiter) },
+	{ emu_settings_type::MGODisableHUD,              get_cfg_location(local_cfg.mgo.disable_hud) },
+	{ emu_settings_type::MGODisableLobbyBGM,         get_cfg_location(local_cfg.mgo.disable_lobby_bgm) },
+	{ emu_settings_type::MGODisableMotionBlur,       get_cfg_location(local_cfg.mgo.disable_blur) },
+	{ emu_settings_type::MGOLowerExposure,           get_cfg_location(local_cfg.mgo.lower_exposure) },
+	{ emu_settings_type::MGOSPUCullingWaitBypass,    get_cfg_location(local_cfg.mgo.spu_culling_wait_bypass) },
+	{ emu_settings_type::MGOTaskAcceleration,        get_cfg_location(local_cfg.mgo.task_acceleration) },
+	{ emu_settings_type::MGOAudioMixerFastPath,      get_cfg_location(local_cfg.mgo.audio_mixer_fast_path) },
+	{ emu_settings_type::MGOUPnPPort,                get_cfg_location(local_cfg.mgo.upnp_port) },
+	// The MGO tab reuses the Net nodes for these (they are the same options),
+	// so BindAddress / EnableUpnp / DeriveMacFromPsid are intentionally reused
+	// rather than duplicated here.
+
 	// Logs
 	{ emu_settings_type::Log, get_cfg_location(local_cfg.log)},
 };

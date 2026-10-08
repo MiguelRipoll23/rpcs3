@@ -383,6 +383,21 @@ struct cfg_root : cfg::node
 
 	} misc{ this };
 
+	struct node_mgo : cfg::node
+	{
+		node_mgo(cfg::node* _this) : cfg::node(_this, "MGO") {}
+
+		cfg::_bool disable_limiter{ this, "Disable Limiter", true };
+		cfg::_bool disable_hud{ this, "Disable HUD", false };
+		cfg::_bool disable_lobby_bgm{ this, "Disable Lobby BGM", false };
+		cfg::_bool disable_blur{ this, "Disable Blur", true };
+		cfg::_bool lower_exposure{ this, "Lower Exposure", true };
+		cfg::_bool spu_culling_wait_bypass{ this, "SPU Culling Wait Bypass", true };
+		cfg::_enum<mgo_task_acceleration> task_acceleration{ this, "Task Acceleration", mgo_task_acceleration::basic };
+		cfg::_bool audio_mixer_fast_path{ this, "Audio Mixer Fast Path", false };
+		cfg::uint<0, 65535> upnp_port{ this, "UPnP Port", 5730, true };
+	} mgo{ this };
+
 	cfg::log_entry log{ this, "Log" };
 
 	std::string name{};

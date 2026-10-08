@@ -170,6 +170,18 @@ bool serialize<ppu_thread::cr_bits>(utils::serial& ar, typename ppu_thread::cr_b
 extern void ppu_initialize();
 extern void ppu_finalize(const ppu_module<lv2_obj>& info, bool force_mem_release = false);
 extern bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only = false, u64 file_size = 0);
+
+// MGO PPU call-site hooks (rpcs3/Emu/Cell/SPUTaskHLE).
+namespace spu_task_hle::ppu
+{
+	void on_module_loaded(u32 base, u32 size, bool forced);
+}
+
+// MGO's lwarx spin handling, called from ppu_lwarx below.
+namespace spu_task_hle::mgo_waits
+{
+	bool ppu_lwarx_wait(ppu_thread& ppu, u32 addr, u32 value);
+}
 static void ppu_initialize2(class jit_compiler& jit, const ppu_module<lv2_obj>& module_part, const std::string& cache_path, const std::string& obj_name);
 extern bool ppu_load_exec(const ppu_exec_object&, bool virtual_load, const std::string&, utils::serial* = nullptr);
 extern std::pair<shared_ptr<lv2_overlay>, CellError> ppu_load_overlay(const ppu_exec_object&, bool virtual_load, const std::string& path, s64 file_offset, utils::serial* = nullptr);
@@ -3177,7 +3189,21 @@ static T ppu_load_acquire_reservation(ppu_thread& ppu, u32 addr)
 
 extern u32 ppu_lwarx(ppu_thread& ppu, u32 addr)
 {
-	return ppu_load_acquire_reservation<u32>(ppu, addr);
+	const u32 value = ppu_load_acquire_reservation<u32>(ppu, addr);
+
+	// The fork appends a tail to this function (0x143249fef onwards): a
+	// six-way switch on the guest PC against the lwarx wait-site table, then
+	// a gate on one byte of the configuration, then the reporter - and the
+	// loaded value is put back in rax afterwards, because the reporter parks
+	// the thread and the load still has to return what it loaded.
+	//
+	// `spu_task_hle::mgo_waits::ppu_lwarx_wait` does all three steps and
+	// re-reads the PC itself, so the switch is a fast path rather than the
+	// only gate. `cia` is this tree's name for the field the fork reads at
+	// ppu_thread+0x474 as `pc`.
+	spu_task_hle::mgo_waits::ppu_lwarx_wait(ppu, addr, value);
+
+	return value;
 }
 
 extern u64 ppu_ldarx(ppu_thread& ppu, u32 addr)
@@ -4474,6 +4500,9 @@ extern void ppu_initialize()
 	if (!_main.segs.empty())
 	{
 		ppu_initialize(_main);
+
+		// MGO: install the PPU hooks against the freshly mapped main ELF.
+		spu_task_hle::ppu::on_module_loaded(_main.segs[0].addr, _main.segs[0].size, false);
 	}
 
 	// Initialize preloaded libraries
@@ -4485,6 +4514,8 @@ extern void ppu_initialize()
 		}
 
 		ppu_initialize(*ptr);
+
+		spu_task_hle::ppu::on_module_loaded(ptr->segs[0].addr, ptr->segs[0].size, false);
 	}
 }
 
